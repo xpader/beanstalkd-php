@@ -18,7 +18,12 @@ class Server
 	 * @var Tube[]
 	 */
 	protected $tubes = [];
-	protected $data = [];
+
+	/**
+	 * @var Job[]
+	 */
+	protected $jobs = [];
+
 	protected $nextId = 1;
 
 	protected $stats = [
@@ -36,8 +41,8 @@ class Server
 	    'cmd-use' => 0,
 	    'cmd-watch' => 0,
 	    'cmd-ignore' => 0,
-	    'cmd-release' => '总共执行release指令的次数',
-	    'cmd-bury' => '总共执行bury指令的次数',
+	    'cmd-release' => 0,
+	    'cmd-bury' => 0,
 	    'cmd-kick' => '总共执行kick指令的次数',
 	    'cmd-stats' => 0,
 	    'cmd-stats-job' => '总共执行stats-job指令的次数',
@@ -125,12 +130,6 @@ class Server
 
 		echo "Receive: $data\r\n";
 
-		/**
-		 * @var $connection \Workerman\Connection\TcpConnection
-		 */
-
-		global $queueData;
-
 		switch ($cmd) {
 			case 'use':
 				$name = $arg;
@@ -160,10 +159,15 @@ class Server
 				$tube = $this->getTube($connection->qUsing);
 
 				$priority = (int)strtok($arg, ' ');
-				$value = strtok('');
+				$delay = (int)strtok(' ');
+				$ttr = (int)strtok(' ');
+				$bytes = (int)strtok(' ');
+				$value = substr(strtok(''), 2, $bytes);
 
-				$id = $this->addData($connection->qUsing, Queue::JOB_READY, $value);
-				$tube->put($id, $priority);
+				$status = $delay > 0 ? Job::STATUS_DELAYED : Job::STATUS_READY;
+
+				$id = $this->addJob($connection->qUsing, $priority, $status, $ttr, $value);
+				$tube->put($id, $priority, $status);
 				$connection->send(sprintf('OK %d', $id));
 
 				$this->log('data: '.print_r($this->data));
@@ -206,6 +210,43 @@ class Server
 				if (isset($queueLinks[$id])) {
 
 				}
+				break;
+
+			case 'release':
+				$id = (int)strtok($arg, ' ');
+				$priority = (int)strtok(' ');
+				$delay = (int)strtok(' ');
+
+				$job = $this->getJob($id);
+
+				if ($job && $job->status == Job::STATUS_RESERVED) {
+					$job->pri = $priority;
+					$tube = $this->getTube($job->tube);
+					$tube->release($job, $delay);
+					$connection->send('RELEASED');
+				} else {
+					$connection->send('NOT_FOUND');
+				}
+
+				++$this->stats['cmd-release'];
+				break;
+
+			case 'bury':
+				$id = (int)strtok($arg, ' ');
+				$priority = (int)strtok(' ');
+
+				$job = $this->getJob($id);
+
+				if ($job && $job->status == Job::STATUS_RESERVED) {
+					$job->pri = $priority;
+					$tube = $this->getTube($job->tube);
+					$tube->bury($job);
+					$connection->send('BURIED');
+				} else {
+					$connection->send('NOT_FOUND');
+				}
+
+				++$this->stats['cmd-bury'];
 				break;
 
 			case 'ignore':
@@ -308,17 +349,21 @@ class Server
 		return $id;
 	}
 
-	public function addData($tube, $status, $value)
+	public function addJob($tube, $pri, $status, $ttr, $value)
 	{
-		$id = $this->nextId;
+		$job = new Job($this->nextId, $tube, $pri, $status, $ttr, $value);
 		++$this->nextId;
-		$this->data[$id] = [$tube, $status, $value];
-		return $id;
+		$this->jobs[$job->id] = $job;
+		return $job->id;
 	}
 
-	public function getData($id)
+	/**
+	 * @param $id
+	 * @return null|Job
+	 */
+	public function getJob($id)
 	{
-		return isset($this->data[$id]) ? $this->data[$id] : null;
+		return isset($this->jobs[$id]) ? $this->jobs[$id] : null;
 	}
 
 	protected function log($message)

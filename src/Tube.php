@@ -7,6 +7,7 @@
  */
 
 namespace xpader\beanstalkd;
+use Workerman\Lib\Timer;
 
 /**
  * Class Tube
@@ -38,9 +39,9 @@ class Tube
 	 */
 	protected $queueReady;
 
-	protected $queueBuried;
-	protected $queueDelayed;
-	protected $queueReserved;
+	protected $queueBuried = [];
+	protected $queueDelayed = [];
+	protected $queueReserved = [];
 
 	/**
 	 * @var Connection[]
@@ -68,7 +69,7 @@ class Tube
 		if ($name == 'queue') {
 			if ($this->queueReady === null) {
 				$this->queueReady = new Queue();
-				$this->queueReady->setExtractFlags(\SplPriorityQueue::EXTR_DATA);
+				$this->queueReady->setExtractFlags(\SplPriorityQueue::EXTR_BOTH);
 			}
 
 			return $this->queueReady;
@@ -105,10 +106,42 @@ class Tube
 		}
 	}
 
-	public function put($id, $priority)
+	public function put($id, $priority, $status)
 	{
-		$this->queue->insert($id, $priority);
+		if ($status == Job::STATUS_READY) {
+			$this->queue->insert($id, $priority);
+			$this->dispatch();
+		} else {
+
+		}
+
 		++$this->totalJobs;
+	}
+
+	/**
+	 * @param int|Job $id
+	 * @param int $delay
+	 */
+	public function release($id, $delay=0)
+	{
+		if ($id instanceof Job) {
+			$job = $id;
+		} else {
+			$job = $this->server->getJob($id);
+			if (!$job) {
+				return;
+			}
+		}
+
+		if ($job->status != Job::STATUS_RESERVED) {
+			return;
+		}
+
+		$this->queue->insert($id, $job->pri);
+		if (isset($this->queueReserved[$id])) {
+			unset($this->queueReserved[$id]);
+		}
+		$job->status = Job::STATUS_READY;
 		$this->dispatch();
 	}
 
@@ -120,12 +153,21 @@ class Tube
 
 		while ($this->queue->valid()) {
 			$id = $this->queue->current();
+			$job = $this->server->getJob($id);
+
+			//The job maybe deleted or other status.
+			if ($job === null || $job->status != Job::STATUS_READY) {
+				$this->queue->next();
+				continue;
+			}
 
 			while ($connection = array_shift($this->reserves)) {
 				if ($connection->reserving) {
-					list(,, $value) = $this->server->getData($id);
-					$connection->send(sprintf('RESERVED %d %d %s', $id, strlen($value), $value));
+					$connection->send(sprintf('RESERVED %d %d %s', $id, strlen($job->value), $job->value));
 					$connection->reserving = false;
+					$job->status = Job::STATUS_RESERVED;
+					$this->queueReserved[$job->id] = $job->id;
+					Timer::add($job->ttr, [$this, 'release'], $job->id, false);
 					$this->queue->next();
 					break;
 				}
@@ -135,6 +177,18 @@ class Tube
 				break;
 			}
 		}
+	}
+
+	/**
+	 * @param Job $job
+	 */
+	public function bury($job)
+	{
+		if (isset($this->queueReserved[$job->id])) {
+			unset($this->queueReserved[$job->id]);
+		}
+		$job->status = Job::STATUS_BURIED;
+		$this->queueBuried[$job->id] = $job->id;
 	}
 
 	public function stats()

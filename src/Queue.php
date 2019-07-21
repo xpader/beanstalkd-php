@@ -10,9 +10,6 @@ namespace xpader\beanstalkd;
 
 class Queue extends \SplPriorityQueue {
 
-	const JOB_READY = 0;
-	const JOB_RESERVED = 1;
-
 	public function compare($l, $r)
 	{
 		if ($l === $r) return 0;
