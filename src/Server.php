@@ -167,10 +167,10 @@ class Server
 				$status = $delay > 0 ? Job::STATUS_DELAYED : Job::STATUS_READY;
 
 				$id = $this->addJob($connection->qUsing, $priority, $status, $ttr, $value);
-				$tube->put($id, $priority, $status);
+				$tube->put($id, $priority, $delay);
 				$connection->send(sprintf('OK %d', $id));
 
-				$this->log('data: '.print_r($this->data));
+				$this->log('data: '.print_r($this->jobs));
 				break;
 
 			case 'watch':
@@ -358,11 +358,13 @@ class Server
 	}
 
 	/**
-	 * @param $id
+	 * @param int $id
 	 * @return null|Job
 	 */
 	public function getJob($id)
 	{
+		var_dump($id);
+		$this->log("Get job: $id");
 		return isset($this->jobs[$id]) ? $this->jobs[$id] : null;
 	}
 

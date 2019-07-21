@@ -69,7 +69,7 @@ class Tube
 		if ($name == 'queue') {
 			if ($this->queueReady === null) {
 				$this->queueReady = new Queue();
-				$this->queueReady->setExtractFlags(\SplPriorityQueue::EXTR_BOTH);
+				$this->queueReady->setExtractFlags(\SplPriorityQueue::EXTR_DATA);
 			}
 
 			return $this->queueReady;
@@ -106,13 +106,26 @@ class Tube
 		}
 	}
 
-	public function put($id, $priority, $status)
+	public function put($id, $priority, $delay=0)
 	{
-		if ($status == Job::STATUS_READY) {
+		if ($delay == 0) {
 			$this->queue->insert($id, $priority);
 			$this->dispatch();
 		} else {
-
+			$this->queueDelayed[$id] = $id;
+			Timer::add($delay, function($tube, $id) {
+				/* @var $tube Tube */
+				$job = $tube->server->getJob($id);
+				if (!$job || $job->status != Job::STATUS_DELAYED) {
+					return;
+				}
+				if (isset($this->queueDelayed[$id])) {
+					unset($this->queueDelayed[$id]);
+				}
+				$job->status = Job::STATUS_READY;
+				$tube->queue->insert($id, $job->pri);
+				$tube->dispatch();
+			}, [$this, $id], false);
 		}
 
 		++$this->totalJobs;
@@ -137,11 +150,12 @@ class Tube
 			return;
 		}
 
-		$this->queue->insert($id, $job->pri);
 		if (isset($this->queueReserved[$id])) {
 			unset($this->queueReserved[$id]);
 		}
+
 		$job->status = Job::STATUS_READY;
+		$this->queue->insert($id, $job->pri);
 		$this->dispatch();
 	}
 
@@ -197,9 +211,9 @@ class Tube
 			'name' => $this->name,
 			'current-jobs-urgent' => 0,
 			'current-jobs-ready' => $this->queue->count(),
-			'current-jobs-reserved' => 0,
-			'current-jobs-delayed' => 0,
-			'current-jobs-buried' => 0,
+			'current-jobs-reserved' => count($this->queueReserved),
+			'current-jobs-delayed' => count($this->queueDelayed),
+			'current-jobs-buried' => count($this->queueBuried),
 			'total-jobs' => $this->totalJobs,
 			'current-using' => count($this->uses),
 			'current-watching' => count($this->watchs),
@@ -248,6 +262,10 @@ class Tube
 
 	public function __destruct() {
 		$this->queueReady = $this->watchs = $this->reserves = $this->uses = null;
+	}
+
+	public function __sleep() {
+		// TODO: Implement __sleep() method.
 	}
 
 }
