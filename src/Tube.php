@@ -112,8 +112,7 @@ class Tube
 			$this->queue->insert($id, $priority);
 			$this->dispatch();
 		} else {
-			$this->queueDelayed[$id] = $id;
-			Timer::add($delay, function($tube, $id) {
+			$this->queueDelayed[$id] = Timer::add($delay, function($tube, $id) {
 				/* @var $tube Tube */
 				$job = $tube->server->getJob($id);
 				if (!$job || $job->status != Job::STATUS_DELAYED) {
@@ -129,6 +128,33 @@ class Tube
 		}
 
 		++$this->totalJobs;
+	}
+
+	/**
+	 * @param Job $job
+	 */
+	public function delete($job)
+	{
+		switch ($job->status) {
+			case Job::STATUS_RESERVED:
+				if (isset($this->queueReserved[$job->id])) {
+					Timer::del($this->queueReserved[$job->id]);
+					unset($this->queueReserved[$job->id]);
+				}
+				break;
+			case Job::STATUS_DELAYED:
+				if (isset($this->queueDelayed[$job->id])) {
+					Timer::del($this->queueDelayed[$job->id]);
+					unset($this->queueDelayed[$job->id]);
+				}
+				break;
+			case Job::STATUS_BURIED:
+				if (isset($this->queueBuried[$job->id])) {
+					unset($this->queueBuried[$job->id]);
+				}
+				break;
+		}
+		$this->server->delJob($job->id);
 	}
 
 	/**
@@ -151,6 +177,7 @@ class Tube
 		}
 
 		if (isset($this->queueReserved[$id])) {
+			Timer::del($this->queueReserved[$id]);
 			unset($this->queueReserved[$id]);
 		}
 
@@ -180,8 +207,7 @@ class Tube
 					$connection->send(sprintf('RESERVED %d %d %s', $id, strlen($job->value), $job->value));
 					$connection->reserving = false;
 					$job->status = Job::STATUS_RESERVED;
-					$this->queueReserved[$job->id] = $job->id;
-					Timer::add($job->ttr, [$this, 'release'], $job->id, false);
+					$this->queueReserved[$job->id] = Timer::add($job->ttr, [$this, 'release'], $job->id, false);
 					$this->queue->next();
 					break;
 				}
@@ -262,10 +288,6 @@ class Tube
 
 	public function __destruct() {
 		$this->queueReady = $this->watchs = $this->reserves = $this->uses = null;
-	}
-
-	public function __sleep() {
-		// TODO: Implement __sleep() method.
 	}
 
 }

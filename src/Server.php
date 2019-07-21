@@ -52,7 +52,7 @@ class Server
 	    'cmd-list-tubes-watched' => '总共执行list-tubes-watched指令的次数',
 	    'cmd-pause-tube' => '总共执行pause-tube指令的次数',
 	    'job-timeouts' => '所有超时的job的总共数量',
-	    'total-jobs' => '创建的所有job数量',
+	    'total-jobs' => 0,
 	    'max-job-size' => 'job的数据部分最大长度',
 	    'current-tubes' => 0,
 	    'current-connections' => 0,
@@ -206,9 +206,13 @@ class Server
 
 			case 'delete':
 				$id = (int)$arg;
-
-				if (isset($queueLinks[$id])) {
-
+				$job = $this->getJob($id);
+				if ($job) {
+					$tube = $this->getTube($job->tube);
+					$tube->delete($job);
+					$connection->send('DELETED');
+				} else {
+					$connection->send('NOT_FOUND');
 				}
 				break;
 
@@ -280,6 +284,7 @@ class Server
 
 			case 'stats':
 				++$this->stats['cmd-stats'];
+				$this->stats['total-jobs'] = $this->nextId - 1;
 				$this->stats['current-tubes'] = count($this->tubes);
 				$this->stats['current-connections'] = count($this->worker->connections);
 
@@ -349,6 +354,14 @@ class Server
 		return $id;
 	}
 
+	/**
+	 * @param string $tube
+	 * @param int $pri
+	 * @param int $status
+	 * @param int $ttr
+	 * @param mixed $value
+	 * @return int
+	 */
 	public function addJob($tube, $pri, $status, $ttr, $value)
 	{
 		$job = new Job($this->nextId, $tube, $pri, $status, $ttr, $value);
@@ -363,9 +376,14 @@ class Server
 	 */
 	public function getJob($id)
 	{
-		var_dump($id);
-		$this->log("Get job: $id");
 		return isset($this->jobs[$id]) ? $this->jobs[$id] : null;
+	}
+
+	public function delJob($id)
+	{
+		if (isset($this->jobs[$id])) {
+			unset($this->jobs[$id]);
+		}
 	}
 
 	protected function log($message)
