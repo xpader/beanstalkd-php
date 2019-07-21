@@ -1,0 +1,21 @@
+{
+    "name": "xpader/beanstalkd-php",
+    "description": "Beanstalkd server php implemention.",
+    "type": "library",
+    "license": "Apache License 2.0",
+    "authors": [
+        {
+            "name": "pader",
+            "email": "ypnow@163.com"
+        }
+    ],
+    "require": {
+        "workerman/workerman": "^3.5"
+    },
+    "autoload": {
+        "psr-4": {
+            "xpader\\beanstalkd\\": "src",
+            "Protocols\\": "src/Protocols"
+        }
+    }
+}
