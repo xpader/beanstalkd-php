@@ -120,15 +120,8 @@ class Server
 		}
 
 		//获取输入命令
-		$cmdSplit = strpos($data, ' ');
-
-		if ($cmdSplit) {
-			$cmd = substr($data, 0, $cmdSplit);
-			$arg = substr($data, $cmdSplit + 1);
-		} else {
-			$cmd = $data;
-			$arg = null;
-		}
+		$cmd = strtok($data, ' ');
+		$arg = strtok('');
 
 		echo "Receive: $data\r\n";
 
