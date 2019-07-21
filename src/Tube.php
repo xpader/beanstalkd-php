@@ -13,7 +13,6 @@ use Workerman\Lib\Timer;
  * Class Tube
  * @package xpader\beanstalkd
  * 
- * @property \SplPriorityQueue $queue
  * @method void addWatch(Connection $connection)
  * @method void removeWatch(Connection $connection)
  * @method void addUse(Connection $connection)
@@ -35,9 +34,10 @@ class Tube
 	public $server;
 
 	/**
+	 * Ready queue
 	 * @var \SplPriorityQueue
 	 */
-	protected $queueReady;
+	protected $queue;
 
 	protected $queueBuried = [];
 	protected $queueDelayed = [];
@@ -63,19 +63,8 @@ class Tube
 	public function __construct($name, $server) {
 		$this->name = $name;
 		$this->server = $server;
-	}
-
-	public function __get($name) {
-		if ($name == 'queue') {
-			if ($this->queueReady === null) {
-				$this->queueReady = new Queue();
-				$this->queueReady->setExtractFlags(\SplPriorityQueue::EXTR_DATA);
-			}
-
-			return $this->queueReady;
-		} else {
-			throw new \RuntimeException("Getting undefined property '$name'.");
-		}
+		$this->queue = new Queue();
+		$this->queue->setExtractFlags(\SplPriorityQueue::EXTR_DATA);
 	}
 
 	public function __call($name, $arguments) {
@@ -182,8 +171,7 @@ class Tube
 		}
 
 		$job->status = Job::STATUS_READY;
-		$this->queue->insert($id, $job->pri);
-		$this->dispatch();
+		$this->put($job->id, $job->pri, $delay);
 	}
 
 	protected function dispatch()
@@ -207,7 +195,7 @@ class Tube
 					$connection->send(sprintf('RESERVED %d %d %s', $id, strlen($job->value), $job->value));
 					$connection->reserving = false;
 					$job->status = Job::STATUS_RESERVED;
-					$this->queueReserved[$job->id] = Timer::add($job->ttr, [$this, 'release'], $job->id, false);
+					$this->queueReserved[$job->id] = Timer::add($job->ttr, [$this, 'release'], [$job->id], false);
 					$this->queue->next();
 					break;
 				}
@@ -229,6 +217,18 @@ class Tube
 		}
 		$job->status = Job::STATUS_BURIED;
 		$this->queueBuried[$job->id] = $job->id;
+	}
+
+	/**
+	 * @param Job $job
+	 */
+	public function touch($job)
+	{
+		if (!isset($this->queueReserved[$job->id])) {
+			return;
+		}
+		Timer::del($this->queueReserved[$job->id]);
+		$this->queueReserved[$job->id] = Timer::add($job->ttr, [$this, 'release'], [$job->id], false);
 	}
 
 	public function stats()

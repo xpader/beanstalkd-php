@@ -201,6 +201,8 @@ class Server
 					$this->getTube($name)->addReserve($connection);
 				}
 
+				//Todo: DEADLINE_SOON Response
+
 				$this->log("Client {$connection->id} is reserving..");
 				break;
 
@@ -251,6 +253,19 @@ class Server
 				}
 
 				++$this->stats['cmd-bury'];
+				break;
+
+			case 'touch':
+				$id = (int)$arg;
+				$job = $this->getJob($id);
+
+				if ($job && $job->status == Job::STATUS_RESERVED) {
+					$tube = $this->getTube($job->tube);
+					$tube->touch($job);
+					$connection->send('TOUCHED');
+				} else {
+					$connection->send('NOT_FOUND');
+				}
 				break;
 
 			case 'ignore':
