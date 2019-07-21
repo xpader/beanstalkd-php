@@ -231,6 +231,11 @@ class Tube
 		$this->queueReserved[$job->id] = Timer::add($job->ttr, [$this, 'release'], [$job->id], false);
 	}
 
+	public function kick($job)
+	{
+
+	}
+
 	public function stats()
 	{
 		return [

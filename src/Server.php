@@ -32,6 +32,7 @@ class Server
         'current-jobs-reserved' => 0,
         'current-jobs-delayed' => 0,
         'current-jobs-bureid' => 0,
+		'cmd-delete' => 0,
 	    'cmd-put' => 0,
 	    'cmd-peek' => '总共执行peek指令的次数',
 	    'cmd-peek-ready' => '总共执行peek-ready指令的次数',
@@ -44,9 +45,10 @@ class Server
 	    'cmd-release' => 0,
 	    'cmd-bury' => 0,
 	    'cmd-kick' => '总共执行kick指令的次数',
+		'cmd-touch' => 0,
 	    'cmd-stats' => 0,
 	    'cmd-stats-job' => '总共执行stats-job指令的次数',
-	    'cmd-stats-tube' => '总共执行stats-tube指令的次数',
+	    'cmd-stats-tube' => 0,
 	    'cmd-list-tubes' => 0,
 	    'cmd-list-tube-used' => '总共执行list-tube-used指令的次数',
 	    'cmd-list-tubes-watched' => '总共执行list-tubes-watched指令的次数',
@@ -216,6 +218,7 @@ class Server
 				} else {
 					$connection->send('NOT_FOUND');
 				}
+				++$this->stats['cmd-delete'];
 				break;
 
 			case 'release':
@@ -266,6 +269,8 @@ class Server
 				} else {
 					$connection->send('NOT_FOUND');
 				}
+
+				++$this->stats['cmd-touch'];
 				break;
 
 			case 'ignore':
@@ -283,17 +288,46 @@ class Server
 				++$this->stats['cmd-ignore'];
 				break;
 
-			case 'stats-tube':
-				$tube = $arg;
-				if (isset($this->tubes[$tube])) {
-					$connection->send(print_r($this->tubes[$tube]->stats(), true));
+			case 'peek':
+				$id = (int)$arg;
+				$job = $this->getJob($id);
+				if ($job) {
+					$connection->send(sprintf("FOUND %d %d\r\n%s", $job->id, strlen($job->value), $job->value));
+				} else {
+					$connection->send('NOT_FOUND');
+				}
+				++$this->stats['cmd-peek'];
+				break;
+
+			//Todo: peek-ready
+			//Todo: peek-delayed
+			//Todo: peek-buried
+			//Todo: kick
+
+			case 'kick-job':
+				$id = (int)$arg;
+				$job = $this->getJob($id);
+				if ($job && ($job->status == Job::STATUS_BURIED || $job->status == Job::STATUS_DELAYED)) {
+					$tube = $this->getTube($job->tube);
+					$tube->kick($job);
+					$connection->send('KICKED');
 				} else {
 					$connection->send('NOT_FOUND');
 				}
 				break;
 
+			case 'stats-tube':
+				$tube = $arg;
+				if (isset($this->tubes[$tube])) {
+					self::sendStats($connection, $this->tubes[$tube]->stats());
+				} else {
+					$connection->send('NOT_FOUND');
+				}
+				++$this->stats['cmd-stats-tube'];
+				break;
+
 			case 'list-tubes':
-				$connection->send(sprintf("OK %d\r\n%s", count($this->tubes), json_encode(array_keys($this->tubes))));
+				self::sendStats($connection, array_keys($this->tubes));
 				++$this->stats['cmd-list-tubes'];
 				break;
 
@@ -302,8 +336,7 @@ class Server
 				$this->stats['total-jobs'] = $this->nextId - 1;
 				$this->stats['current-tubes'] = count($this->tubes);
 				$this->stats['current-connections'] = count($this->worker->connections);
-
-				$connection->send(sprintf("OK\r\n%s", print_r($this->stats, true)));
+				self::sendStats($connection, $this->stats);
 				break;
 
 			case 'quit':
@@ -404,6 +437,19 @@ class Server
 	protected function log($message)
 	{
 		echo $message."\r\n";
+	}
+
+	/**
+	 * @param Connection $connection
+	 * @param $stats
+	 */
+	protected static function sendStats($connection, $stats)
+	{
+		$str = "---\n";
+		foreach ($stats as $k => $v) {
+			$str .= (is_int($k) ? '-' : $k.':')." $v\n";
+		}
+		$connection->send(sprintf("OK %d\r\n%s", strlen($str), $str));
 	}
 
 }
