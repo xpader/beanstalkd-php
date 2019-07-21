@@ -170,7 +170,7 @@ class Server
 
 				$id = $this->addJob($connection->qUsing, $priority, $status, $ttr, $value);
 				$tube->put($id, $priority, $delay);
-				$connection->send(sprintf('OK %d', $id));
+				$connection->send(sprintf('INSERTED %d', $id));
 
 				$this->log('data: '.print_r($this->jobs));
 				break;

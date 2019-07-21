@@ -233,7 +233,7 @@ class Tube
 
 	public function kick($job)
 	{
-
+		//Todo: kick
 	}
 
 	public function stats()
